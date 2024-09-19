@@ -91,7 +91,10 @@ async function indexContentInTypesense({
 const getExistingSynonyms = async (client, collectionName) => {
   try {
     const response = await client.collections(collectionName).synonyms().retrieve();
-    return Object.values(response.synonyms || {});
+    return Object.entries(response.synonyms || {}).map(([id, data]) => ({
+      id,
+      ...data
+    }));
   } catch (error) {
     console.warn(`Failed to retrieve synonyms from ${collectionName}:`, error);
     return [];
@@ -102,9 +105,17 @@ const getExistingSynonyms = async (client, collectionName) => {
 const upsertSynonyms = async (client, collectionName, synonyms) => {
   for (const synonym of synonyms) {
     try {
-      await client.collections(collectionName).synonyms().upsert(synonym.id, {
+      const synonymData = {
         synonyms: synonym.synonyms
-      });
+      };
+
+      // Add root field for one-way synonyms
+      if (synonym.root) {
+        synonymData.root = synonym.root;
+      }
+
+      await client.collections(collectionName).synonyms().upsert(synonym.id, synonymData);
+      console.log(`Successfully upserted synonym ${synonym.id}`);
     } catch (error) {
       console.warn(`Failed to upsert synonym ${synonym.id}:`, error);
     }
@@ -175,6 +186,9 @@ exports.onPostBuild = async (
   if (existingSynonyms.length > 0) {
     reporter.info(`[Typesense] Upserting ${existingSynonyms.length} synonyms to new collection`)
     try {
+      for (const synonym of existingSynonyms) {
+        reporter.verbose(`[Typesense] Upserting synonym: ${JSON.stringify(synonym)}`)
+      }
       await upsertSynonyms(typesense, newCollectionName, existingSynonyms)
       reporter.info(`[Typesense] Successfully upserted synonyms to new collection`)
     } catch (error) {

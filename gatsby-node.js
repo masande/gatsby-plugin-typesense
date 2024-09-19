@@ -131,6 +131,8 @@ exports.onPostBuild = async (
   newCollectionSchema.name = newCollectionName
 
   let oldCollectionName
+  let existingSynonyms = []
+  
   try {
     oldCollectionName = (
       await typesense.aliases(collectionSchema.name).retrieve()

@@ -87,6 +87,28 @@ async function indexContentInTypesense({
   }
 }
 
+// New function to get existing synonyms
+const getExistingSynonyms = async (client, collectionName) => {
+  try {
+    const synonyms = await client.collections(collectionName).synonyms().retrieve();
+    return synonyms;
+  } catch (error) {
+    console.warn(`Failed to retrieve synonyms from ${collectionName}:`, error);
+    return [];
+  }
+};
+
+// New function to upsert synonyms
+const upsertSynonyms = async (client, collectionName, synonyms) => {
+  for (const synonym of synonyms) {
+    try {
+      await client.collections(collectionName).synonyms().upsert(synonym.id, synonym);
+    } catch (error) {
+      console.warn(`Failed to upsert synonym ${synonym.id}:`, error);
+    }
+  }
+};
+
 exports.onPostBuild = async (
   { reporter },
   {
@@ -107,6 +129,20 @@ exports.onPostBuild = async (
   const newCollectionName = generateNewCollectionName(collectionSchema)
   const newCollectionSchema = { ...collectionSchema }
   newCollectionSchema.name = newCollectionName
+
+  let oldCollectionName
+  try {
+    oldCollectionName = (
+      await typesense.aliases(collectionSchema.name).retrieve()
+    )["collection_name"]
+    reporter.verbose(`[Typesense] Old collection name was ${oldCollectionName}`)
+
+    // Get existing synonyms before creating the new collection
+    const existingSynonyms = await getExistingSynonyms(typesense, oldCollectionName);
+    reporter.verbose(`[Typesense] Retrieved ${existingSynonyms.length} synonyms from old collection`)
+  } catch (error) {
+    reporter.verbose(`[Typesense] No old collection found, proceeding without synonyms`)
+  }
 
   try {
     reporter.verbose(`[Typesense] Creating collection ${newCollectionName}`)
@@ -130,14 +166,10 @@ exports.onPostBuild = async (
     })
   }
 
-  let oldCollectionName
-  try {
-    oldCollectionName = (
-      await typesense.aliases(collectionSchema.name).retrieve()
-    )["collection_name"]
-    reporter.verbose(`[Typesense] Old collection name was ${oldCollectionName}`)
-  } catch (error) {
-    reporter.verbose(`[Typesense] No old collection found, proceeding`)
+  // Upsert synonyms after indexing is complete
+  if (existingSynonyms && existingSynonyms.length > 0) {
+    reporter.verbose(`[Typesense] Upserting ${existingSynonyms.length} synonyms to new collection`)
+    await upsertSynonyms(typesense, newCollectionName, existingSynonyms);
   }
 
   try {
